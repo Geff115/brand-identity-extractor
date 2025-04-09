@@ -1,10 +1,10 @@
 # Logo Extractor
 
-Logo Extractor is a tool designed to extract logos from images or documents efficiently. It leverages advanced image processing techniques to identify and isolate logos for further use.
+Logo Extractor is a tool designed to extract brand logos from web pages efficiently by providing a URL. It leverages advanced image processing techniques to identify and isolate logos for further use.
 
 ## Features
 
-- Extract logos from images or PDFs.
+- Extract brand logos from websites images or PDFs.
 - Support for multiple file formats (JPEG, PNG, PDF, etc.).
 - Easy-to-use interface.
 - High accuracy and performance.
