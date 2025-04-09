@@ -1,6 +1,6 @@
 # Pydantic models
 from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, HttpUrl, Field
+from pydantic import BaseModel, HttpUrl, Field, validator
 
 class ExtractionRequest(BaseModel):
     url: HttpUrl = Field(..., description="URL of the website to extract brand identity from")
@@ -11,6 +11,11 @@ class LogoData(BaseModel):
     width: Optional[int] = Field(None, description="Width of the logo in pixels")
     height: Optional[int] = Field(None, description="Height of the logo in pixels")
     source: str = Field(..., description="How the logo was extracted (e.g., 'meta-tag', 'img-tag', 'ai-detection')")
+    
+    # Validators to handle potential None values
+    @validator('source', pre=True)
+    def validate_source(cls, v):
+        return v or "unknown"
 
 class ColorData(BaseModel):
     hex: str = Field(..., description="Hex code of the color")

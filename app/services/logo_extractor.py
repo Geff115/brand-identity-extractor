@@ -19,7 +19,7 @@ class LogoExtractor:
     def __init__(self):
         self.session = requests.Session()
     
-    async def extract_logo(self, html_content: str, screenshot: Optional[str], base_url: str) -> Dict:
+    async def extract_logo(self, html_content: str, screenshot: Optional[str] = None, base_url: str = "") -> Dict:
         """
         Extract logo from website content
         

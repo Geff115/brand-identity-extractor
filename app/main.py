@@ -7,7 +7,7 @@ import uvicorn
 from app.services.scraper import WebScraper
 from app.services.logo_extractor import LogoExtractor
 from app.services.color_extractor import ColorExtractor
-from app.models.schemas import ExtractionResponse, ExtractionRequest
+from app.models.schemas import ExtractionResponse, ExtractionRequest, LogoData
 
 app = FastAPI(
     title="Brand Identity Extractor API",
@@ -36,20 +36,45 @@ async def extract_brand_identity(request: ExtractionRequest):
     """
     try:
         scraper = WebScraper()
-        html_content, screenshot = await scraper.scrape(request.url)
+        html_content, screenshot = await scraper.scrape(str(request.url))
+        if not html_content:
+            raise HTTPException(status_code=404, detail="No content found at the provided URL")
+        
+        # Screenshot is optional in our current implementation
         
         logo_extractor = LogoExtractor()
-        logo_data = await logo_extractor.extract_logo(html_content, screenshot, request.url)
+        logo_data = await logo_extractor.extract_logo(html_content, screenshot, str(request.url))
+        
+        # Make logo optional - don't raise an error if not found
         
         color_extractor = ColorExtractor()
-        colors = await color_extractor.extract_colors(html_content, logo_data["image"])
+        colors = await color_extractor.extract_colors(html_content, logo_data.get("image"))
+        
+        # Create response with proper handling of logo data
+        logo_model = None
+        if logo_data and logo_data.get("source"):
+            try:
+                logo_model = LogoData(
+                    url=logo_data.get("url"),
+                    image=logo_data.get("image"),
+                    width=logo_data.get("width"),
+                    height=logo_data.get("height"),
+                    source=logo_data.get("source", "unknown")
+                )
+            except Exception as e:
+                print(f"Error creating LogoData: {str(e)}")
+                # Continue without logo data
         
         return ExtractionResponse(
             url=request.url,
-            logo=logo_data,
+            logo=logo_model,
             colors=colors,
-            success=True
+            success=True,
+            message="Extraction completed successfully"
         )
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 

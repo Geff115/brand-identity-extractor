@@ -48,11 +48,11 @@ class ColorExtractor:
         # Deduplicate colors and return
         return self._deduplicate_colors(colors)
     
-    def _extract_colors_from_logo(self, logo_image: str) -> List[Dict]:
+    def _extract_colors_from_logo(self, logo_image: Optional[str]) -> List[Dict]:
         """Extract dominant colors from logo"""
         try:
             # Parse base64 image
-            if not logo_image or not logo_image.startswith('data:image/'):
+            if not logo_image or not isinstance(logo_image, str) or not logo_image.startswith('data:image/'):
                 return []
             
             # Extract the base64 part
