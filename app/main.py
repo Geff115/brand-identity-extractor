@@ -1,5 +1,5 @@
 # FastAPI Application
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import HttpUrl
 import uvicorn
@@ -7,6 +7,7 @@ import uvicorn
 from app.services.scraper import WebScraper
 from app.services.logo_extractor import LogoExtractor
 from app.services.color_extractor import ColorExtractor
+from app.services.enhanced_scraper import EnhancedWebScraper
 from app.models.schemas import ExtractionResponse, ExtractionRequest, LogoData
 
 app = FastAPI(
@@ -24,29 +25,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Dependency for the scraper
+async def get_scraper():
+    scraper = EnhancedWebScraper(use_cache=True)
+    try:
+        yield scraper
+    finally:
+        await scraper.close()
+
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {"status": "ok", "message": "Brand Identity Extractor API is running"}
 
 @app.post("/extract", response_model=ExtractionResponse)
-async def extract_brand_identity(request: ExtractionRequest):
+async def extract_brand_identity(request: ExtractionRequest, scraper: EnhancedWebScraper = Depends(get_scraper)):
     """
     Extract brand logo and colors from a website
     """
     try:
-        scraper = WebScraper()
+        # Scrape the website with the headless browser
         html_content, screenshot = await scraper.scrape(str(request.url))
         if not html_content:
             raise HTTPException(status_code=404, detail="No content found at the provided URL")
         
-        # Screenshot is optional in our current implementation
-        
+        # Extract logo using both HTML and screenshot
         logo_extractor = LogoExtractor()
         logo_data = await logo_extractor.extract_logo(html_content, screenshot, str(request.url))
         
-        # Make logo optional - don't raise an error if not found
-        
+        # Extract colors from HTML and logo
         color_extractor = ColorExtractor()
         colors = await color_extractor.extract_colors(html_content, logo_data.get("image"))
         

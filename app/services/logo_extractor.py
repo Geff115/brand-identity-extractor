@@ -9,6 +9,9 @@ from io import BytesIO
 import re
 from typing import Dict, Optional, List
 
+from app.services.ai_logo_detector import AILogoDetector
+from app.services.fallback_logo_detector import FallbackLogoDetector
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -18,6 +21,8 @@ class LogoExtractor:
     
     def __init__(self):
         self.session = requests.Session()
+        self.ai_logo_detector = AILogoDetector()
+        self.fallback_detector = FallbackLogoDetector()
     
     async def extract_logo(self, html_content: str, screenshot: Optional[str] = None, base_url: str = "") -> Dict:
         """
@@ -64,8 +69,64 @@ class LogoExtractor:
                 "source": "svg"
             }
         
-        # If all strategies fail, we'll return None for now
-        # In the next phase, we'll add AI-based detection
+        # Strategy 5: Use the screenshot and AI to detect and extract the logo
+        if screenshot and screenshot.startswith('data:image/'):
+            logger.info("Using AI for logo detection from screenshot")
+            
+            # Try AI-based detection first
+            detection_result = await self.ai_logo_detector.detect_logo_from_screenshot(screenshot)
+            
+            # If AI detection fails, use fallback heuristic detection
+            if not detection_result.get("logo_detected") and "error" in detection_result:
+                logger.info("AI detection failed, using fallback heuristic detection")
+                detection_result = await self.fallback_detector.detect_logo_from_screenshot(screenshot)
+            
+            # If a logo was detected and we have bounding box coordinates
+            if detection_result.get("logo_detected") and detection_result.get("bounding_box"):
+                logger.info(f"Logo detected at {detection_result.get('location')}: {detection_result.get('description')}")
+                
+                # Visualize the detection (useful for debugging)
+                if hasattr(self.ai_logo_detector, 'visualize_logo_detection'):
+                    self.ai_logo_detector.visualize_logo_detection(
+                        screenshot, 
+                        detection_result["bounding_box"], 
+                        "detected_logo_visualization.png"
+                    )
+                
+                # Crop the logo from the screenshot
+                # Use the appropriate detector for cropping
+                if detection_result.get("detection_method", "").startswith("heuristic"):
+                    cropped_logo = await self.fallback_detector.crop_logo_from_screenshot(
+                        screenshot, 
+                        detection_result["bounding_box"]
+                    )
+                else:
+                    cropped_logo = await self.ai_logo_detector.crop_logo_from_screenshot(
+                        screenshot, 
+                        detection_result["bounding_box"]
+                    )
+                
+                if cropped_logo:
+                    # Try to estimate dimensions of the cropped logo
+                    width, height = None, None
+                    try:
+                        # Extract dimensions from the bounding box
+                        box = detection_result["bounding_box"]
+                        width = int(box["x2"]) - int(box["x1"])
+                        height = int(box["y2"]) - int(box["y1"])
+                    except:
+                        pass
+                    
+                    return {
+                        "url": None,  # No direct URL as this is extracted from screenshot
+                        "image": cropped_logo,
+                        "width": width,
+                        "height": height,
+                        "source": detection_result.get("detection_method", "ai-detection"),
+                        "description": detection_result.get("description")
+                    }
+
+        # If all strategies fail, return not found
         return {
             "url": None,
             "image": None,
@@ -82,7 +143,7 @@ class LogoExtractor:
             return urljoin(base_url, og_image['content'])
         
         # Check for Twitter image
-        twitter_image = soup.find('meta', name='twitter:image')
+        twitter_image = soup.find('meta', attrs={'name': 'twitter:image'})
         if twitter_image and twitter_image.get('content'):
             return urljoin(base_url, twitter_image['content'])
         

@@ -11,6 +11,7 @@ class LogoData(BaseModel):
     width: Optional[int] = Field(None, description="Width of the logo in pixels")
     height: Optional[int] = Field(None, description="Height of the logo in pixels")
     source: str = Field(..., description="How the logo was extracted (e.g., 'meta-tag', 'img-tag', 'ai-detection')")
+    description: Optional[str] = Field(None, description="Description of the logo (from AI detection)")
     
     # Validators to handle potential None values
     @validator('source', pre=True)
