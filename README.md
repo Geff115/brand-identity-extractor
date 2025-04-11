@@ -1,61 +1,215 @@
-# Logo Extractor
+# 🧠 Brand Identity Extractor API
 
-Logo Extractor is a tool designed to extract brand logos from web pages efficiently by providing a URL. It leverages advanced image processing techniques to identify and isolate logos for further use.
+The **Brand Identity Extractor** is a powerful API that extracts brand logos and color palettes from any website URL. It's built for developers and designers who need to capture brand assets automatically — perfect for mockups, presentations, and design automation.
 
-## Features
+---
 
-- Extract brand logos from websites images or PDFs.
-- Support for multiple file formats (JPEG, PNG, PDF, etc.).
-- Easy-to-use interface.
-- High accuracy and performance.
+## 🚀 Features
 
-## Installation
+- **Logo Extraction** — Uses intelligent strategies to identify brand logos
+- **Color Palette Detection** — Generates semantic palettes with role-based categorization
+- **JavaScript Rendering** — Supports modern JS-heavy websites with headless browser tech
+- **Caching** — Fast response times for repeat requests
+- **Graceful Degradation** — Partial results returned when full extraction isn’t possible
+- **Rate Limiting** — Prevents abuse with usage caps
+- **Error Handling** — Clear and traceable error messages
 
-1. Clone the repository:
-    ```bash
-    git clone https://github.com/yourusername/logo_extractor.git
-    ```
-2. Navigate to the project directory:
-    ```bash
-    cd logo_extractor
-    ```
-3. Install dependencies:
-    ```bash
-    pip install -r requirements.txt
-    ```
+---
 
-## Usage
+## ⚙️ Getting Started
 
-1. Place your input files in the `input` folder.
-2. Run the script:
-    ```bash
-    python extract_logo.py
-    ```
-3. Extracted logos will be saved in the `output` folder.
+### Installation
 
-## Contributing
+Clone the repo and start the API with Docker:
 
-Contributions are welcome! Please follow these steps:
+```bash
+git clone https://github.com/Geff115/brand-identity-extractor.git
+cd brand-identity-extractor
+cp .env.example .env
+# Edit .env with your custom settings
+docker-compose up -d
+```
 
-1. Fork the repository.
-2. Create a new branch:
-    ```bash
-    git checkout -b feature-name
-    ```
-3. Commit your changes:
-    ```bash
-    git commit -m "Add feature-name"
-    ```
-4. Push to your branch:
-    ```bash
-    git push origin feature-name
-    ```
-5. Open a pull request.
+## Environment Variables
 
-## License
+VARIABLE	        DESCRIPTION	                             DEFAULT
+REDIS_URL	        Redis connection URL	                 redis://localhost:6379/0
+OPENAI_API_KEY	    (Optional) OpenAI key for AI assist	     None
+ADMIN_KEY	        Admin key for cache control	             admin-secret-key
+RATE_LIMIT	        Max requests per hour	                 60
+RATE_WINDOW	        Time window in seconds	                 3600
 
-This project is licensed under the [MIT License](LICENSE).
+## 📬 API Endpoints
+### 🔍 Extract Brand Identity
 
-## Contact
+```http
+POST /extract
+```
 
-For questions or feedback, please contact [gabrielnoah129@gmail.com].
+Request:
+```json
+{
+  "url": "https://example.com"
+}
+```
+
+Headers (optional):
+
+    - X-API-Key: Your API key
+
+    - X-Rate-Limit-*: Rate limit info
+
+    - X-Request-ID: Request trace ID
+
+## ✅ Health Check
+
+```http
+GET /health
+```
+Returns system component status.
+
+## 🧹 Clear Cache
+
+```http
+DELETE /cache
+```
+Headers:
+    - X-Admin-Key: Admin key for authorization
+
+Query param (alternative):
+    - admin_key=your-admin-key
+
+## 🔄 Response Format
+
+Example response:
+```json
+{
+  "url": "https://example.com",
+  "logo": {
+    "url": "https://example.com/logo.png",
+    "image": "data:image/png;base64,...",
+    "width": 200,
+    "height": 100,
+    "source": "meta-tag",
+    "description": "Example company logo with blue text"
+  },
+  "colors": [
+    {
+      "hex": "#4285f4",
+      "rgb": [66, 133, 244],
+      "source": "logo-dominant"
+    }
+  ],
+  "enhanced_colors": {
+    "palette": {
+      "primary": { "hex": "#4285f4", "name": "blue", ... },
+      "secondary": { "hex": "#ea4335", "name": "red", ... },
+      ...
+    },
+    "all_colors": {
+      "logo": [...],
+      "css": [...],
+      "inline": []
+    }
+  },
+  "success": true,
+  "message": "Extraction completed successfully"
+}
+```
+
+## 📉 Rate Limiting
+
+Default: 60 requests/hour
+Rate info is included in headers:
+    - X-Rate-Limit-Limit
+    - X-Rate-Limit-Remaining
+    - X-Rate-Limit-Reset
+
+Exceeding this limit returns 429 Too Many Requests.
+
+## ❌ Error Handling
+
+Consistent error response:
+```json
+{
+  "error": {
+    "message": "Error description",
+    "category": "network",
+    "timestamp": 1646838291.234,
+    "trace_id": "uuid"
+  }
+}
+```
+Common Error Categories
+- network
+
+- external_service
+
+- validation
+
+- authentication
+
+- authorization
+
+- resource
+
+- rate_limit
+
+- server
+
+## 📦 Technologies
+
+- Backend: FastAPI, Uvicorn
+
+- Scraping: Playwright, Beautiful Soup
+
+- Color Analysis: ColorThief, Pillow
+
+- AI (Optional): OpenAI API
+
+- Caching & Performance: Redis, Circuit Breaker, Request Debouncing
+
+- Testing: Pytest, HTTPX
+
+- Containerization: Docker, Docker Compose
+
+## 🛠️ Future Enhancements
+
+- Font and tagline extraction
+
+- Layout & brand guideline generation
+
+- Logo vectorization
+
+- GraphQL support
+
+- Client SDKs
+
+- CMS & design tool plugins (Figma, Sketch)
+
+- Brand consistency and accessibility checks
+
+## 📌 Examples
+
+Extract Identity:
+```bash
+curl -X POST "https://api.example.com/extract" \
+     -H "Content-Type: application/json" \
+     -d '{"url": "https://www.spotify.com"}'
+```
+
+Health Check:
+```bash
+curl "https://api.example.com/health"
+```
+
+Clear Cache (Admin):
+```bash
+curl -X DELETE "https://api.example.com/cache" \
+     -H "X-Admin-Key: your-admin-key"
+```
+
+## 📫 Contact & Support
+For issues, suggestions, or contributions:
+    - Email: gabrieleffangha2@gmail.com
+    - GitHub: [https://github.com/Geff115/brand-identity-extractor](github.com/Geff115/brand-identity-extractor)
