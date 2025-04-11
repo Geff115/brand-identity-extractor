@@ -11,4 +11,5 @@ httpx==0.25.1
 aiohttp==3.8.6
 playwright==1.39.0
 redis==5.0.1
-dotenv
+redis==5.0.1
+python-dotenv==1.0.0
