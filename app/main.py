@@ -20,6 +20,7 @@ from app.services.cache_service import CacheService
 from app.services.rate_limiter import RateLimiter
 from app.services.circuit_breaker import with_circuit_breaker, CircuitBreakerError
 from app.services.error_handler import ErrorHandler, ErrorDetails, ErrorCategory
+from app.services.health_check import HealthCheck
 from app.models.schemas import ExtractionResponse, ExtractionRequest, LogoData, ColorData, EnhancedColorData
 
 # Load environment variables
@@ -54,9 +55,12 @@ cache_service = CacheService(redis_url=REDIS_URL)
 # Create rate limiter
 rate_limiter = RateLimiter(
     redis_url=REDIS_URL,
-    rate_limit=60,  # 60 requests per hour by default
-    window_size=3600  # 1 hour window
+    rate_limit=int(os.getenv("RATE_LIMIT", "60")),  # 60 requests per hour by default
+    window_size=int(os.getenv("RATE_WINDOW", "3600"))  # 1 hour window
 )
+
+# Create health checker
+health_checker = HealthCheck()
 
 # Dependency for the scraper
 async def get_scraper():
@@ -65,6 +69,44 @@ async def get_scraper():
         yield scraper
     finally:
         await scraper.close()
+
+# Request ID middleware
+@app.middleware("http")
+async def add_request_id(request: Request, call_next):
+    # Generate a unique ID for this request
+    request_id = str(uuid.uuid4())
+    
+    # Add the ID to the request state
+    request.state.request_id = request_id
+    
+    # Process the request
+    try:
+        response = await call_next(request)
+        
+        # Add the request ID to the response headers
+        response.headers["X-Request-ID"] = request_id
+        
+        return response
+    except Exception as e:
+        # If an unhandled exception occurs, log it with the request ID
+        logger.error(f"Unhandled error in request {request_id}: {str(e)}")
+        
+        # Create proper error response
+        error_details = ErrorDetails(
+            message=f"Internal server error: {str(e)}",
+            category=ErrorCategory.SERVER,
+            http_status=500,
+            exception=e,
+            context={"request_id": request_id, "path": request.url.path},
+            trace_id=request_id
+        )
+        error_details.log()
+        
+        # Return JSON error response
+        return JSONResponse(
+            status_code=500,
+            content={"error": error_details.to_dict()}
+        )
 
 # Rate limiting middleware
 @app.middleware("http")
@@ -102,21 +144,77 @@ async def rate_limit_middleware(request: Request, call_next):
     
     return response
 
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    # Generate a trace ID if not already in request state
+    trace_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    
+    # Create error details
+    error_details = ErrorHandler.handle_exception(
+        exc, 
+        context={"path": request.url.path, "method": request.method}
+    )
+    error_details.trace_id = trace_id
+    
+    # Log the error
+    error_details.log()
+    
+    # Return a consistent error response
+    return JSONResponse(
+        status_code=error_details.http_status,
+        content={"error": error_details.to_dict()},
+        headers={"X-Request-ID": trace_id}
+    )
+
 @app.get("/")
 async def root():
     """Health check endpoint"""
     return {"status": "ok", "message": "Brand Identity Extractor API is running"}
 
+@app.get("/health")
+async def health_check():
+    """
+    Detailed health check endpoint
+    
+    Returns the status of all system components
+    """
+    # Check all services
+    health_data = await health_checker.check_all_services(
+        cache_service=cache_service,
+        api_key=os.getenv("OPENAI_API_KEY")
+    )
+    
+    # Return 200 OK if all services are healthy, otherwise 503 Service Unavailable
+    status_code = 200 if health_data["status"] == "healthy" else 503
+    
+    return JSONResponse(
+        status_code=status_code,
+        content=health_data
+    )
+
 @app.post("/extract", response_model=ExtractionResponse)
+@with_circuit_breaker("scraper")
 async def extract_brand_identity(
-    request: ExtractionRequest, 
+    request: ExtractionRequest,
+    request_obj: Request,
     scraper: EnhancedWebScraper = Depends(get_scraper),
-    x_api_key: Optional[str] = Header(None)
+    x_api_key: Optional[str] = Header(None),
 ):
     """
     Extract brand logo and colors from a website
     """
-    try:
+    # Use request ID from middleware if available
+    request_id = getattr(request_obj.state, "request_id", None)
+    
+    # Create context for error handling
+    context = {
+        "url": str(request.url),
+        "request_id": request_id
+    }
+    
+    # Use the error handler context manager
+    async with ErrorHandler.try_catch_async(context=context):
         # Create cache key based on URL
         url_str = str(request.url)
         cache_key = cache_service.create_key("extract", url_str)
@@ -145,22 +243,59 @@ async def extract_brand_identity(
         # Log cache miss
         logger.info(f"Cache miss for {url_str}, extracting fresh data")
         
-        # Scrape the website with the headless browser
-        html_content, screenshot = await scraper.scrape(url_str)
-        if not html_content:
-            raise HTTPException(status_code=404, detail="No content found at the provided URL")
+        # Scrape the website with the headless browser - with circuit breaker protection
+        try:
+            html_content, screenshot = await scraper.scrape(url_str)
+            if not html_content:
+                error_details = ErrorDetails(
+                    message="No content found at the provided URL",
+                    category=ErrorCategory.RESOURCE,
+                    http_status=404,
+                    context=context
+                )
+                error_details.log()
+                raise error_details.to_http_exception()
+        except CircuitBreakerError as e:
+            # Circuit breaker is open, use graceful degradation
+            error_details = ErrorDetails(
+                message="Service temporarily unavailable. Please try again later.",
+                category=ErrorCategory.EXTERNAL_SERVICE,
+                http_status=503,
+                exception=e,
+                context=context
+            )
+            error_details.log()
+            raise error_details.to_http_exception()
         
         # Extract logo using both HTML and screenshot
         logo_extractor = LogoExtractor()
-        logo_data = await logo_extractor.extract_logo(html_content, screenshot, url_str)
+        logo_data = await ErrorHandler.with_error_handling(
+            logo_extractor.extract_logo,
+            html_content, screenshot, url_str,
+            context={"step": "logo_extraction", **context},
+            fallback_result={"url": None, "image": None, "width": None, "height": None, "source": "extraction-failed"},
+            raise_error=False
+        )
         
         # Extract basic colors (for backward compatibility)
         color_extractor = ColorExtractor()
-        basic_colors = await color_extractor.extract_colors(html_content, logo_data.get("image"))
+        basic_colors = await ErrorHandler.with_error_handling(
+            color_extractor.extract_colors,
+            html_content, logo_data.get("image"),
+            context={"step": "color_extraction", **context},
+            fallback_result=[],
+            raise_error=False
+        )
         
         # Extract enhanced colors with semantic palette
         enhanced_color_extractor = EnhancedColorExtractor()
-        enhanced_colors = await enhanced_color_extractor.extract_colors(html_content, logo_data.get("image"))
+        enhanced_colors = await ErrorHandler.with_error_handling(
+            enhanced_color_extractor.extract_colors,
+            html_content, logo_data.get("image"),
+            context={"step": "enhanced_color_extraction", **context},
+            fallback_result=None,
+            raise_error=False
+        )
         
         # Create response with proper handling of logo data
         logo_model = None
@@ -225,21 +360,13 @@ async def extract_brand_identity(
             "success": response.success,
             "message": response.message
         }
-
+        
         # Cache the response
         await cache_service.set(cache_key, response_dict)
         
         return response
-    except HTTPException:
-        # Re-raise HTTP exceptions
-        raise
-    except Exception as e:
-        import traceback
-        logger.error(f"Error processing request: {str(e)}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
-@app.delete("/cache", status_code=204)
+@app.delete("/cache")
 async def clear_cache(admin_key: Optional[str] = Header(None), admin_key_param: Optional[str] = Query(None, alias="admin_key")):
     """
     Clear the API cache (admin only)
